@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Saco de Boxeo Virtual</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Estilos personalizados para la física y el saco */
+        body {
+            /* Evitar scroll al golpear rápidamente en móviles */
+            touch-action: pan-x pan-y;
+            overflow: hidden; 
+        }
+
+        .pantalla {
+            transition: opacity 0.3s ease-in-out;
+        }
+
+        .oculto {
+            opacity: 0;
+            pointer-events: none;
+            position: absolute;
+            top: -9999px;
+        }
+
+        /* Contenedor del saco con perspectiva para 3D */
+        .area-boxeo {
+            perspective: 1000px;
+        }
+
+        /* El saco en sí, el punto de rotación es arriba (la cadena) */
+        .saco-boxeo {
+            transform-origin: top center;
+            transition: transform 0.1s cubic-bezier(0.25, 1, 0.5, 1);
+            position: relative;
+            cursor: crosshair;
+            /* Evitar la selección de texto al golpear rápido */
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        /* Forma del saco usando bordes redondeados */
+        .forma-saco {
+            width: 160px;
+            height: 300px;
+            background: linear-gradient(135deg, #e53e3e 0%, #9b2c2c 100%);
+            border-radius: 50% 50% 50% 50% / 15% 15% 85% 85%;
+            box-shadow: 
+                inset -15px -15px 30px rgba(0,0,0,0.5),
+                inset 10px 10px 20px rgba(255,255,255,0.3),
+                10px 20px 30px rgba(0,0,0,0.4);
+            position: relative;
+            margin: 0 auto;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        @media (min-width: 768px) {
+            .forma-saco {
+                width: 220px;
+                height: 400px;
+            }
+        }
+
+        /* Cadena que sostiene el saco */
+        .cadena {
+            width: 10px;
+            height: 80px;
+            background: repeating-linear-gradient(
+                to bottom,
+                #718096,
+                #718096 10px,
+                #4a5568 10px,
+                #4a5568 20px
+            );
+            margin: 0 auto;
+            border-radius: 5px;
+            box-shadow: 2px 2px 5px rgba(0,0,0,0.3);
+        }
+
+        /* Contenedor de la cara subida */
+        .contenedor-cara {
+            width: 120px;
+            height: 120px;
+            border-radius: 50%;
+            overflow: hidden;
+            border: 4px dashed rgba(255, 255, 255, 0.4);
+            background-color: rgba(0,0,0,0.2);
+            position: absolute;
+            top: 40%;
+            box-shadow: inset 0px 0px 15px rgba(0,0,0,0.8);
+            pointer-events: none; /* Que el clic pase al saco */
+        }
+
+        @media (min-width: 768px) {
+            .contenedor-cara {
+                width: 160px;
+                height: 160px;
+            }
+        }
+
+        .imagen-cara {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            opacity: 0.8; /* Ligeramente transparente para integrarse con el saco */
+            mix-blend-mode: multiply; /* Efecto impreso en el cuero */
+        }
+
+        /* Animación para el efecto de impacto visual (BAM!) */
+        .efecto-impacto {
+            position: fixed;
+            font-weight: 900;
+            font-size: 2rem;
+            color: #fbbf24; /* Amarillo */
+            text-shadow: 2px 2px 0 #b45309, -2px -2px 0 #b45309, 2px -2px 0 #b45309, -2px 2px 0 #b45309;
+            pointer-events: none;
+            z-index: 50;
+            animation: explotar 0.4s forwards cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            transform: translate(-50%, -50%);
+        }
+
+        @keyframes explotar {
+            0% { transform: translate(-50%, -50%) scale(0.5) rotate(-10deg); opacity: 1; }
+            50% { transform: translate(-50%, -50%) scale(1.5) rotate(10deg); opacity: 1; }
+            100% { transform: translate(-50%, -150%) scale(1) rotate(0deg); opacity: 0; }
+        }
+
+        /* Animaciones para el saco siendo golpeado (se asignan por JS) */
+        .golpe-izq { animation: balanceoIzq 0.3s ease-out; }
+        .golpe-der { animation: balanceoDer 0.3s ease-out; }
+        .golpe-centro { animation: balanceoCentro 0.3s ease-out; }
+
+        @keyframes balanceoIzq {
+            0% { transform: rotate(0deg) translateX(0); }
+            30% { transform: rotate(15deg) translateX(20px) scaleY(0.95); }
+            60% { transform: rotate(-5deg) translateX(-10px); }
+            100% { transform: rotate(0deg) translateX(0); }
+        }
+
+        @keyframes balanceoDer {
+            0% { transform: rotate(0deg) translateX(0); }
+            30% { transform: rotate(-15deg) translateX(-20px) scaleY(0.95); }
+            60% { transform: rotate(5deg) translateX(10px); }
+            100% { transform: rotate(0deg) translateX(0); }
+        }
+
+        @keyframes balanceoCentro {
+            0% { transform: rotateX(0deg) scale(1); }
+            30% { transform: rotateX(20deg) scale(0.95); }
+            100% { transform: rotateX(0deg) scale(1); }
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white min-h-screen font-sans flex flex-col antialiased">
+
+    <!-- Pantalla 1: Configuración (Subir Foto) -->
+    <div id="pantalla-inicio" class="pantalla flex flex-col items-center justify-center flex-grow p-6">
+        <div class="max-w-md w-full bg-gray-800 rounded-3xl p-8 shadow-2xl border border-gray-700 text-center">
+            <div class="mb-6 flex justify-center">
+                <!-- Icono de guante de boxeo (SVG inline) -->
+                <svg class="w-20 h-20 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V8a2 2 0 00-2-2h-5m-4 0V5a2 2 0 114 0v1m-4 0a2 2 0 104 0m-5 8a2 2 0 100-4 2 2 0 000 4zm0 0c1.306 0 2.417.835 2.83 2M9 14a3.001 3.001 0 00-2.83 2M15 11h3m-3 4h2"></path>
+                </svg>
+            </div>
+            <h1 class="text-3xl font-black mb-2 text-white tracking-tight">Terapia de Choque</h1>
+            <p class="text-gray-400 mb-8 text-sm">Sube una foto, colócala en el saco de boxeo y libera tu estrés a puros toques.</p>
+            
+            <label for="input-foto" class="cursor-pointer group flex flex-col items-center justify-center w-full h-40 border-2 border-dashed border-gray-600 rounded-2xl bg-gray-700/50 hover:bg-gray-700 hover:border-red-500 transition-all duration-300">
+                <svg class="w-10 h-10 text-gray-400 group-hover:text-red-400 mb-3 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
+                <span class="text-sm font-medium text-gray-300 group-hover:text-white">Toca para subir una foto</span>
+                <span class="text-xs text-gray-500 mt-1">Formatos: JPG, PNG, WEBP</span>
+                <input type="file" id="input-foto" class="hidden" accept="image/*">
+            </label>
+        </div>
+    </div>
+
+    <!-- Pantalla 2: Acción (El Saco de Boxeo) -->
+    <div id="pantalla-accion" class="pantalla oculto flex flex-col h-screen w-full relative">
+        
+        <!-- Header con estadísticas -->
+        <div class="absolute top-0 w-full p-4 flex justify-between items-center z-10">
+            <button id="btn-volver" class="bg-gray-800 hover:bg-gray-700 text-white p-3 rounded-full transition-colors shadow-lg border border-gray-700">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
+            </button>
+            <div class="bg-gray-800/80 backdrop-blur border border-gray-700 rounded-2xl px-6 py-2 shadow-lg text-center">
+                <span class="block text-xs text-gray-400 uppercase tracking-wider font-bold">Golpes Conectados</span>
+                <span id="contador-golpes" class="text-3xl font-black text-red-500">0</span>
+            </div>
+            <div class="w-12"></div> <!-- Spacer para centrar el contador -->
+        </div>
+
+        <!-- Área interactiva -->
+        <div class="area-boxeo flex-grow flex flex-col justify-start pt-16 sm:pt-10 overflow-hidden relative" id="zona-click">
+            <div class="saco-boxeo" id="el-saco">
+                <div class="cadena"></div>
+                <div class="forma-saco">
+                    <div class="contenedor-cara">
+                        <img id="cara-subida" class="imagen-cara" src="" alt="Objetivo">
+                    </div>
+                </div>
+            </div>
+            <!-- Instrucción sutil en la parte inferior -->
+            <p class="text-center text-gray-500 mt-8 animate-pulse text-sm font-medium">Toca el saco repetidamente</p>
+        </div>
+    </div>
+
+    <script>
+        // DOM Elements
+        const pantallaInicio = document.getElementById('pantalla-inicio');
+        const pantallaAccion = document.getElementById('pantalla-accion');
+        const inputFoto = document.getElementById('input-foto');
+        const caraSubida = document.getElementById('cara-subida');
+        const btnVolver = document.getElementById('btn-volver');
+        const elSaco = document.getElementById('el-saco');
+        const contadorGolpesEl = document.getElementById('contador-golpes');
+        const areaBoxeo = document.querySelector('.area-boxeo');
+
+        // Estado de la app
+        let golpes = 0;
+        let audioContext = null;
+
+        // --- SISTEMA DE AUDIO (Sintetizador Web Audio API) ---
+        // Generamos el sonido por código para no depender de archivos externos
+        function inicializarAudio() {
+            if (!audioContext) {
+                const AudioContext = window.AudioContext || window.webkitAudioContext;
+                audioContext = new AudioContext();
+            }
+            if (audioContext.state === 'suspended') {
+                audioContext.resume();
+            }
+        }
+
+        function reproducirSonidoGolpe() {
+            if (!audioContext) return;
+            
+            // Crear oscilador para el tono grave (impacto sordo)
+            const oscillator = audioContext.createOscillator();
+            const gainNode = audioContext.createGain();
+            
+            oscillator.connect(gainNode);
+            gainNode.connect(audioContext.destination);
+            
+            // Configurar sonido: caída rápida de frecuencia para simular "golpe"
+            const tiempoActual = audioContext.currentTime;
+            
+            oscillator.type = 'sine'; // Onda senoidal suave para simular saco pesado
+            oscillator.frequency.setValueAtTime(150, tiempoActual); // Empieza grave
+            oscillator.frequency.exponentialRampToValueAtTime(0.01, tiempoActual + 0.1); // Cae a cero rápido
+            
+            // Envolvente de volumen (ataque instantáneo, decaimiento rápido)
+            gainNode.gain.setValueAtTime(1, tiempoActual);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, tiempoActual + 0.1);
+            
+            // Reproducir
+            oscillator.start(tiempoActual);
+            oscillator.stop(tiempoActual + 0.1);
+        }
+
+        // --- MANEJO DE IMÁGENES Y NAVEGACIÓN ---
+
+        inputFoto.addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    caraSubida.src = e.target.result;
+                    iniciarAccion();
+                }
+                reader.readAsDataURL(file);
+            }
+        });
+
+        function iniciarAccion() {
+            pantallaInicio.classList.add('oculto');
+            pantallaInicio.style.display = 'none';
+            
+            pantallaAccion.style.display = 'flex';
+            // Pequeño timeout para que la transición de opacidad funcione
+            setTimeout(() => {
+                pantallaAccion.classList.remove('oculto');
+            }, 50);
+
+            golpes = 0;
+            actualizarMarcador();
+            inicializarAudio();
+        }
+
+        btnVolver.addEventListener('click', () => {
+            pantallaAccion.classList.add('oculto');
+            setTimeout(() => {
+                pantallaAccion.style.display = 'none';
+                pantallaInicio.style.display = 'flex';
+                setTimeout(() => {
+                    pantallaInicio.classList.remove('oculto');
+                }, 50);
+            }, 300);
+            // Resetear input para permitir subir la misma foto otra vez si se quiere
+            inputFoto.value = ''; 
+        });
+
+        function actualizarMarcador() {
+            contadorGolpesEl.innerText = golpes;
+            // Pequeña animación del contador
+            contadorGolpesEl.style.transform = 'scale(1.5)';
+            setTimeout(() => {
+                contadorGolpesEl.style.transform = 'scale(1)';
+            }, 100);
+            contadorGolpesEl.style.transition = 'transform 0.1s ease';
+        }
+
+        // --- SISTEMA DE COMBATE E INTERACCIÓN ---
+
+        // Textos de cómic para el impacto
+        const textosImpacto = ["¡BAM!", "¡POW!", "¡CRASH!", "¡ZAS!", "¡BOOM!", "¡PAF!"];
+
+        function crearEfectoVisual(x, y) {
+            const efecto = document.createElement('div');
+            efecto.className = 'efecto-impacto';
+            
+            // Seleccionar texto aleatorio
+            efecto.innerText = textosImpacto[Math.floor(Math.random() * textosImpacto.length)];
+            
+            // Posicionar donde se hizo clic
+            efecto.style.left = `${x}px`;
+            efecto.style.top = `${y}px`;
+            
+            document.body.appendChild(efecto);
+            
+            // Limpiar DOM después de la animación
+            setTimeout(() => {
+                efecto.remove();
+            }, 400);
+        }
+
+        function registrarGolpe(e) {
+            // Prevenir comportamiento default (como zoom o scroll en doble tap)
+            e.preventDefault();
+            
+            // Asegurarnos de que el audio funcione (necesita interacción del usuario)
+            inicializarAudio();
+            reproducirSonidoGolpe();
+
+            golpes++;
+            actualizarMarcador();
+
+            // Obtener coordenadas del clic/toque
+            let clientX, clientY;
+            if (e.type === 'touchstart') {
+                clientX = e.touches[0].clientX;
+                clientY = e.touches[0].clientY;
+            } else {
+                clientX = e.clientX;
+                clientY = e.clientY;
+            }
+
+            // Crear texto de impacto
+            crearEfectoVisual(clientX, clientY);
+
+            // Determinar dirección de la animación basada en dónde golpeó respecto al centro de la pantalla
+            const centroPantallaX = window.innerWidth / 2;
+            
+            // Remover clases anteriores para reiniciar animación
+            elSaco.classList.remove('golpe-izq', 'golpe-der', 'golpe-centro');
+            
+            // Forzar reflow para reiniciar la animación CSS
+            void elSaco.offsetWidth; 
+
+            // Aplicar física visual: Si golpeas a la izquierda, el saco se balancea hacia la derecha
+            if (clientX < centroPantallaX - 40) {
+                elSaco.classList.add('golpe-izq');
+            } else if (clientX > centroPantallaX + 40) {
+                elSaco.classList.add('golpe-der');
+            } else {
+                elSaco.classList.add('golpe-centro');
+            }
+            
+            // Añadir un ligero destello rojo/blanco a la cara
+            caraSubida.style.filter = "brightness(2) sepia(1) hue-rotate(-50deg) saturate(5)";
+            setTimeout(() => {
+                caraSubida.style.filter = "none";
+            }, 100);
+        }
+
+        // Eventos para detectar golpes (soporte para mouse y pantallas táctiles)
+        elSaco.addEventListener('mousedown', registrarGolpe);
+        elSaco.addEventListener('touchstart', registrarGolpe, { passive: false });
+
+    </script>
+</body>
+</html>
